@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
+import javafx.util.*;
 
 // To access data classes.
 import railway.sim.utils.*;
@@ -41,6 +42,13 @@ public class Player implements railway.sim.Player {
     private int[][] transit;
     private List<String> townLookup;
      private double[][] revenue;
+     private int[][] owner;
+     private double[][] indirect_revenue;
+     private Integer[][] paths;
+     private Integer [][][] prev_paths;
+     private HashMap<String, Integer> map;
+     private Integer owner_idx;
+
 
     private class playerNames
     {
@@ -68,13 +76,14 @@ public class Player implements railway.sim.Player {
         }
     }
 
-    public void init(
+   public void init(
         String name,
         double budget,
         List<Coordinates> geo,
         List<List<Integer>> infra,
         int[][] transit,
-        List<String> townLookup) {
+        List<String> townLookup,
+        List<BidInfo> allBids) {
 
         this.budget = budget;
         this.name = name;
@@ -83,7 +92,44 @@ public class Player implements railway.sim.Player {
         this.transit = deepClone(transit);
         this.townLookup = deepClone(townLookup);
 
-         revenue = getRevenue(); 
+        Integer size = townLookup.size();
+        indirect_revenue = new double[size][size];
+        owner = new int[size][size];
+        map = new HashMap<>();
+        owner_idx = 1;
+
+         revenue = getRevenue();
+         prev_paths = new Integer[size][size][size];
+          for(int i=0;i<size;i++)
+          {
+            for(int j=0;j<size;j++)
+            {
+                for(int k=0;k<size;k++)
+                    prev_paths[i][j][k]=-1;
+            }
+          }
+          try
+         {
+            paths = Floyd_Warshall(); 
+            update_propogation(paths);
+        }
+        catch(Exception e)
+        {
+            e.printStackTrace();
+        }
+
+         for(int i=0;i<size;i++)
+         {
+            System.out.println("expected revenues");
+            for(int j=0;j<size;j++)
+            {
+                System.out.print(indirect_revenue[i][j] + " ");
+
+            }
+            System.out.println();
+         }
+
+
     }
 
     // public Bid getBid(List<Bid> currentBids, List<BidInfo> allBids) {
@@ -134,16 +180,40 @@ public class Player implements railway.sim.Player {
     // }
 
 
-    public Bid getBid(List<Bid> currentBids, List<BidInfo> allBids) {
+    public Bid getBid(List<Bid> currentBids, List<BidInfo> allBids, Bid lastRoundMaxBid) 
+{
         
 
         availableBids.clear();
+        double total_expected_utility=0;
 
         for (BidInfo bi : allBids) {
             if (bi.owner == null) {
                 availableBids.add(bi);
+                Pair<Integer,Integer> T= getTownIndices(bi.town1,bi.town2);
+                total_expected_utility+= indirect_revenue[T.getKey()][T.getValue()];
+            }
+            else
+            {  
+
+                Pair<Integer,Integer> towns = getTownIndices(bi.town1,bi.town2);
+                if(map.containsKey(bi.owner))
+                {
+                    owner[towns.getKey()][towns.getValue()] = map.get(bi.owner);
+                }
+                else
+                {
+                    map.put(bi.owner,owner_idx);
+                    owner[towns.getKey()][towns.getValue()] = owner_idx;
+                     owner_idx++;
+                }
+
             }
         }
+
+
+        paths = Floyd_Warshall(); 
+        update_propogation(paths);
 
         if (availableBids.size() == 0) {
             return null;
@@ -169,7 +239,7 @@ public class Player implements railway.sim.Player {
 
 
         Boolean bid_in_round =  false;
-        double profit = -10000000;
+        double profit = 0;
         double fin_amt = 0;
         int fin_bid_idx = -1;
 
@@ -220,7 +290,8 @@ public class Player implements railway.sim.Player {
             // System.out.println("max bid is" + max_bid + " our prev bid was" + prev_bid);
            if(prev_bid>=min_amt || budget<bid_amount || max_bid<=our_bid ) break;
 
-           if(min_amt>= budget/2) continue;
+           //if(min_amt>= budget/2) continue;
+
 
             //System.out.println("prev bid is" + prev_bid +  "min_amt is " + min_amt + "bid amt is " + bid_amount + "budget is " + budget);
 
@@ -255,7 +326,11 @@ public class Player implements railway.sim.Player {
                 }
 
             //Double curr_Profit =  ((double)transit[t1][t2] + (double)transit[t2][t1])*getDistance(opp.town1,opp.town2)*10 - bid_amount;
-                Double curr_Profit =  revenue[t1][t2] - bid_amount;
+                if(map.containsKey(name) && (owner[t1][t2] == map.get(name) || owner[t2][t1] == map.get(name)) ) continue; // prevent from bidding on both links between towns
+
+                Double curr_Profit =  indirect_revenue[t1][t2] - bid_amount;
+
+                if(min_amt>= budget*curr_Profit/total_expected_utility) continue;
                // System.out.println("traffic between towns " + t1 + " and " + t2 +"is" + transit[t1][t2]);
                 //System.out.println("availabale bids are " + availableBids.size() );
             //curr_Profit-= bid_amount;
@@ -365,6 +440,23 @@ public class Player implements railway.sim.Player {
         }
 
         return getDistance(s,e);
+    }
+
+    private  Pair<Integer,Integer> getTownIndices(String t1, String t2) {
+        // return getDistance(townRevLookup.get(t1), townRevLookup.get(t2));
+
+        int s=-1,e=-1;
+        for(int i=0;i<townLookup.size();i++)
+        {
+            if(townLookup.get(i).equals(t1))
+                s = i;
+            else if (townLookup.get(i).equals(t2))
+                e = i;
+        }
+
+        Pair<Integer,Integer> P = new Pair<>(s,e);
+
+        return P;
     }
 
     // private static double getDistance(int linkId) {
@@ -515,6 +607,161 @@ public class Player implements railway.sim.Player {
        
 
         return playerRev.get(name) - budget;
+    }
+
+    private void update_propogation(Integer[][] paths)
+    {
+        int n = geo.size();
+        // System.out.println("updating traffic");
+        for(int i=0;i<n;i++)
+        {
+            for(int j=i+1;j<n;j++)
+            {
+                Integer[] path_ij = new Integer[n];
+                for(int d=0;d<n;d++)
+                    path_ij[d] = -1;
+
+                int z =i,l=0;;
+                while(z!=j && l<n)
+                {
+                    path_ij[l] = z;
+                    z = paths[z][j];
+                    l++;
+                   // System.out.print(z + " ");
+                    if(paths[z][j]<0 || paths[z][j]>=n) break;
+                }
+                // System.out.println();
+                // System.out.println("updating revenue");
+                
+                try
+                {
+                if(!same_path(i,j,path_ij))
+                {
+                    //System.out.println("different path encountered");
+                    int k=0;
+                    if(indirect_revenue[i][j]>0)
+                    //for(int k=0;k<n-1;k++)
+                    while(k+1<n && path_ij[k+1]!=-1)
+                    {
+                        Integer x = prev_paths[i][j][k];
+                        Integer x_next = prev_paths[i][j][k+1];
+
+                        indirect_revenue[x][x_next] -= revenue[i][j];
+                        //System.out.println("update revenue for " + x + " " + x_next + " " +indirect_revenue[x][x_next]);
+                        k++;
+                    }
+
+                    k=0;
+
+                    //for(int k=0;k<path_ij.size()-1;k++)
+                     while(k+1<n && path_ij[k+1]!=-1)
+                    {
+                        Integer x = path_ij[k];
+                        Integer x_next = path_ij[k+1];
+
+                        indirect_revenue[x][x_next] += revenue[i][j];
+                        k++;
+                    }
+
+                    for(int c=0;c<n;c++)
+                    {
+                        if(path_ij[c]==-1) break;
+
+                        prev_paths[i][j][c] = path_ij[c];
+                    }
+
+
+                }
+            }
+            catch(Exception e)
+            {
+               e.printStackTrace();
+            }
+
+            }
+        }
+
+
+    }
+
+    private Boolean same_path(Integer i, Integer j, Integer[] path_ij)
+    {
+        int n = geo.size();
+
+        for(int k=0;k<n;k++)
+        {
+            //if(prev_paths[i][j][k]==-1) break;
+
+            if(prev_paths[i][j][k]!=path_ij[k])
+                return false;
+        }
+        return true;
+    }
+
+    private Integer[][] Floyd_Warshall()
+    {
+         int n = geo.size();
+        double[][][] D = new double[n][n][n];
+        Integer[][] succ = new Integer[n][n];
+        for(int i=0;i<n;i++)
+        {
+            for(int j=i+1;j<n;j++)
+            if(infra.get(i).contains(j))
+                {
+                    D[0][i][j] = D[0][j][i]=getDistance(i,j);
+                    succ[i][j] = j;
+                    succ[j][i] = i;
+                }
+            else
+            {
+                D[0][i][j] = D[0][j][i]=Double.POSITIVE_INFINITY;
+                succ[i][j] = -1;
+                succ[j][i] = -1;
+            }
+
+        }
+
+        for(int i=0;i<n;i++)
+            succ[i][i] = -1;
+
+        
+
+        for( int k = 1; k<n; k++ )
+        {
+            for(int i=0; i<n;i++)
+            {
+                for(int j=0;j<n;j++)
+                {
+                    //D[k][i][j] = Math.min(D[k-1][i][j], D[k-1][i][k] + D[k-1][k][j]);
+
+                    if(owner[i][k]==owner[k][j])
+                        D[k][i][j] = Math.min(D[k-1][i][j], D[k-1][i][k] + D[k-1][k][j]);
+                    else
+                        D[k][i][j] = Math.min(D[k-1][i][j], D[k-1][i][k] + D[k-1][k][j] + 200);
+
+                    if(D[k][i][j]!=D[k-1][i][j])
+                    {
+                        succ[i][j] = succ[i][k];
+                    }
+
+                }
+            }
+
+        }
+
+
+        // for(int i=0;i<n;i++)
+        // {
+        //     for(int j=0;j<n;j++)
+        //     {
+        //         System.out.print(succ[i][j] + " ");
+        //     }
+        //     System.out.println();
+        // }
+
+        return succ;
+
+
     }
 
 }
