@@ -1,4 +1,4 @@
-package railway.g6;
+package railway.discount;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,6 +48,7 @@ public class Player implements railway.sim.Player {
      private Integer [][][] prev_paths;
      private HashMap<String, Integer> map;
      private Integer owner_idx;
+     private double discount_factor = 0.9;
 
 
     private class playerNames
@@ -184,7 +185,7 @@ public class Player implements railway.sim.Player {
 {
         
 
-        availableBids.clear();
+       availableBids.clear();
         double total_expected_utility=0;
 
         for (BidInfo bi : allBids) {
@@ -220,11 +221,13 @@ public class Player implements railway.sim.Player {
         }
 
 
-        double max_ratio = 0;
+        double max_ratio = 1;
 
-        for(Bid curr : currentBids)
+        //for(Bid curr : currentBids)
+        for(int i=0;i<currentBids.size();i++)
         {
-            
+                Bid curr = currentBids.get(i);
+
                 double dist =0;
                 for(BidInfo tmp: allBids)
                 {
@@ -235,6 +238,7 @@ public class Player implements railway.sim.Player {
                 }
 
                 max_ratio = Math.max(max_ratio, curr.amount/dist);
+                if(curr.bidder.equals(name)) break;
         }
 
 
@@ -274,10 +278,12 @@ public class Player implements railway.sim.Player {
                 else if(curr.bidder.equals(name) && curr.id1 == opp.id)
                 {
                     prev_bid = curr.amount;
+                    break;
                 }
                 else if(curr.bidder.equals(name))
                 {
                     our_bid = curr.amount;
+                    break;
                 }
             }
 
@@ -288,8 +294,28 @@ public class Player implements railway.sim.Player {
             double bid_amount =  Math.max(min_amt+10000,max_ratio*act_dist+10000);
             //System.out.println("amount bid on current link is " + min_amt);
             // System.out.println("max bid is" + max_bid + " our prev bid was" + prev_bid);
-           if(prev_bid>=min_amt || budget<bid_amount || max_bid<=our_bid ) break;
 
+             
+             int t1=-1,t2=-1;
+
+             for(int z=0;z<townLookup.size();z++)
+                {
+                    if(townLookup.get(z).equals(opp.town1))
+                        t1 = z;
+                    else if (townLookup.get(z).equals(opp.town2))
+                        t2 = z;
+                }
+
+
+                if(min_amt == revenue[t1][t2]) /// don't bid 10,000 extra if it's minimum bid
+                    bid_amount = min_amt;
+
+                Double curr_Profit =  indirect_revenue[t1][t2] + revenue[t1][t2] - bid_amount;
+            // System.out.println("player is " + name + " budget is" + budget + " minimum amount is " + min_amt + "bid amount is " + bid_amount + " revenue for the link is " + revenue[t1][t2]+" profit expected is " + curr_Profit);
+
+           //   System.out.println("previous bids issue");
+           if(prev_bid>=min_amt || budget<bid_amount || max_bid<=our_bid ) break;
+          
            //if(min_amt>= budget/2) continue;
 
 
@@ -315,26 +341,22 @@ public class Player implements railway.sim.Player {
            
             //Double curr_Profit = getProfitsPerPlayer(revenue,allBids);
 
-            int t1=-1,t2=-1;
-
-             for(int z=0;z<townLookup.size();z++)
-                {
-                    if(townLookup.get(z).equals(opp.town1))
-                        t1 = z;
-                    else if (townLookup.get(z).equals(opp.town2))
-                        t2 = z;
-                }
-
+            
             //Double curr_Profit =  ((double)transit[t1][t2] + (double)transit[t2][t1])*getDistance(opp.town1,opp.town2)*10 - bid_amount;
+               // System.out.println("already own link to towns issue");
                 if(map.containsKey(name) && (owner[t1][t2] == map.get(name) || owner[t2][t1] == map.get(name)) ) continue; // prevent from bidding on both links between towns
 
-                Double curr_Profit =  indirect_revenue[t1][t2] - bid_amount;
+               
+              //  System.out.println("budget proportion issue");
+                if(min_amt> budget*curr_Profit/total_expected_utility && bid_amount != min_amt) continue;
 
-                if(min_amt>= budget*curr_Profit/total_expected_utility) continue;
+             //   System.out.println("no issues!");
+                
                // System.out.println("traffic between towns " + t1 + " and " + t2 +"is" + transit[t1][t2]);
                 //System.out.println("availabale bids are " + availableBids.size() );
             //curr_Profit-= bid_amount;
-           // System.out.println("profit expected is " + curr_Profit);
+          
+           System.out.println();
             if(curr_Profit>profit)
             {
                 profit = curr_Profit;
@@ -363,6 +385,7 @@ public class Player implements railway.sim.Player {
 
        else 
         return null;
+
 
         // BidInfo randomBid = availableBids.get(rand.nextInt(availableBids.size()));
         // double amount = randomBid.amount;
@@ -628,7 +651,7 @@ public class Player implements railway.sim.Player {
                     z = paths[z][j];
                     l++;
                    // System.out.print(z + " ");
-                    if(paths[z][j]<0 || paths[z][j]>=n) break;
+                    if(z==-1 || paths[z][j]<0 || paths[z][j]>=n) break;
                 }
                 // System.out.println();
                 // System.out.println("updating revenue");
@@ -646,7 +669,8 @@ public class Player implements railway.sim.Player {
                         Integer x = prev_paths[i][j][k];
                         Integer x_next = prev_paths[i][j][k+1];
 
-                        indirect_revenue[x][x_next] -= revenue[i][j];
+                        indirect_revenue[x][x_next] -= Math.pow(discount_factor,k)*10*transit[x][x_next]*getDistance(x,x_next);
+                        //Math.pow(discount_factor,k)*revenue[i][j];
                         //System.out.println("update revenue for " + x + " " + x_next + " " +indirect_revenue[x][x_next]);
                         k++;
                     }
@@ -659,7 +683,8 @@ public class Player implements railway.sim.Player {
                         Integer x = path_ij[k];
                         Integer x_next = path_ij[k+1];
 
-                        indirect_revenue[x][x_next] += revenue[i][j];
+                        indirect_revenue[x][x_next] += Math.pow(discount_factor,k)*10*transit[x][x_next]*getDistance(x,x_next);
+                        //Math.pow(discount_factor,k)*revenue[i][j];
                         k++;
                     }
 
