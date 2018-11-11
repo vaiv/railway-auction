@@ -336,7 +336,7 @@ public class Player implements railway.sim.Player {
 
                  Double curr_Profit =  indirect_revenue[t1][t2] + revenue[t1][t2] - bid_amount;
           
-                if(prev_bid>=min_amt || budget<bid_amount || max_bid<=our_bid )  /// check budget and previous bids
+                if(prev_bid>=min_amt || budget<bid_amount || max_bid<=our_bid || our_bid>=min_amt)  /// check budget and previous bids
                     {
                         // if(budget>=bid_amount)
                         // System.out.println("we already have a higher bid, so not bidding");
@@ -663,6 +663,7 @@ public class Player implements railway.sim.Player {
 
 
                 double node_degree = infra.get(i).size();
+
                 double switch_prob = Math.min(1/node_degree,1);
                 
                 try
@@ -817,3 +818,4 @@ public class Player implements railway.sim.Player {
     }
 
 }
+
